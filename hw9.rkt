@@ -287,7 +287,9 @@
                            (make-platform (- 0 HALF-LOG-W) ROW2 R))))
 (check-expect (tick-world (make-world PLAYER-START '() '())) (make-world PLAYER-START '() '()))
 (define (tick-world w)
-  (make-world (world-player w) (tick-vehicles (world-vehicles w)) (tick-plats (world-plats w))))
+  (make-world (tick-player (world-player w) (world-plats w))
+              (tick-vehicles (world-vehicles w))
+              (tick-plats (world-plats w))))
 
 ;; tick-vehicles: VSet -> VSet
 ;; moves the vehicles in whichever direction they are facing
@@ -306,11 +308,11 @@
           (define (tick-1vehicle v)
             (cond
               [(string=? (vehicle-dir v) "left")
-               (if ((λ(v) (<= (vehicle-x v) (- 0 HALF-CAR-W))) v)
+               (if (<= (vehicle-x v) (- 0 HALF-CAR-W))
                    (make-vehicle (+ BKGD-W HALF-CAR-W) (vehicle-y v) (vehicle-dir v))
                    (make-vehicle (- (vehicle-x v) CAR-SPEED) (vehicle-y v) (vehicle-dir v)))]
               [(string=? (vehicle-dir v) "right")
-               (if ((λ(v) (>= (vehicle-x v) (+ BKGD-W HALF-CAR-W))) v)
+               (if (>= (vehicle-x v) (+ BKGD-W HALF-CAR-W))
                    (make-vehicle (- 0 HALF-CAR-W) (vehicle-y v) (vehicle-dir v))
                    (make-vehicle (+ (vehicle-x v) CAR-SPEED) (vehicle-y v) (vehicle-dir v)))]))]
     (map tick-1vehicle vset)))
@@ -323,8 +325,8 @@
                                      (make-platform (+ (* BKGD-W .5) PLAT-SPEED) ROW2 R)
                                      (make-platform (+ (* BKGD-W .75) PLAT-SPEED) ROW2 R)
                                      (make-platform (- 0 HALF-LOG-W) ROW2 R)))
-(check-expect (tick-plats (list (make-platform HALF-BKGD-W ROW2 R) TURTLE-3-L))
-              (list (make-platform (+ HALF-BKGD-W PLAT-SPEED) ROW2 R)
+(check-expect (tick-plats (list (make-platform HALF-BKGD-W ROW3 L) TURTLE-3-L))
+              (list (make-platform (- HALF-BKGD-W PLAT-SPEED) ROW3 L)
                     (make-platform (+ BKGD-W HALF-TURTLE-W) ROW3 L)))
 (define (tick-plats pset)
   (local [;; tick-1plat: Platform -> Platform
@@ -332,22 +334,35 @@
           (define (tick-1plat plat)
             (cond
               [(string=? (platform-dir plat) "left")
-               (if ((λ(plat) (<= (platform-x plat) (- 0 HALF-TURTLE-W))) plat)
+               (if (<= (platform-x plat) (- 0 HALF-TURTLE-W))
                    (make-platform
                     (+ BKGD-W HALF-TURTLE-W) (platform-y plat) (platform-dir plat))
                    (make-platform
                     (- (platform-x plat) PLAT-SPEED) (platform-y plat) (platform-dir plat)))]
               [(string=? (platform-dir plat) "right")
-               (if ((λ(plat) (>= (platform-x plat) (+ BKGD-W HALF-LOG-W))) plat)
+               (if (>= (platform-x plat) (+ BKGD-W HALF-LOG-W))
                    (make-platform
                     (- 0 HALF-LOG-W) (platform-y plat) (platform-dir plat))
                    (make-platform
                     (+ (platform-x plat) PLAT-SPEED) (platform-y plat) (platform-dir plat)))]))]
     (map tick-1plat pset)))
 
-;; tick-player: Player -> Player
+;; tick-player: Player PSet -> Player
 ;; moves the player if they are on a platform
-;(check-expect 
+(check-expect (tick-player PLAYER-START PSET1) PLAYER-START)
+(check-expect (tick-player (make-posn (* BKGD-W .25) ROW2) PSET1)
+              (make-posn (+ (* BKGD-W .25) PLAT-SPEED) ROW2))
+(check-expect (tick-player (make-posn (* BKGD-W .25) ROW3)
+                           (list (make-platform (* BKGD-W .25) ROW3 L)))
+              (make-posn (- (* BKGD-W .25) PLAT-SPEED) ROW3))
+(define (tick-player p pset)
+  (if (on-any-plat? p pset)
+      (if (or (= (posn-y p) ROW2)
+              (= (posn-y p) ROW4)
+              (= (posn-y p) ROW6))
+          (make-posn (+ (posn-x p) PLAT-SPEED) (posn-y p))
+          (make-posn (- (posn-x p) PLAT-SPEED) (posn-y p)))
+      p))
 
 ;; move-frog: World KeyEvent -> World
 ;; moves the frog when an arrow key is pressed
@@ -403,16 +418,6 @@
 (define (lose? w)
   (any-touching? (world-player w) (world-vehicles w)))
 
-;; touching?: Player Vehicle -> Boolean
-;; determines whether the given player is toucing the given car
-(check-expect (touching? (make-posn (* BKGD-W .375) ROW8) (make-vehicle (* BKGD-W .25) ROW8 L)) #f)
-(check-expect (touching? (make-posn (- (* BKGD-W .25) (+ HALF-FROG-W HALF-CAR-W)) ROW8)
-                         (make-vehicle (* BKGD-W .25) ROW8 L)) #t)
-(define (touching? p v)
-  (and
-   (<= (abs (- (posn-x p) (vehicle-x v))) (+ HALF-CAR-W HALF-FROG-W))
-   (<= (abs (- (posn-y p) (vehicle-y v))) (+ HALF-CAR-H HALF-FROG-H))))
-
 ;; any-touching?: Player VSet -> Boolean
 ;; determines whether any vehicles in a given set are touching the player
 (check-expect (any-touching? (make-posn (* BKGD-W .375) ROW8) VSET1) #f)
@@ -429,20 +434,27 @@
     [(cons? vset) (or (touching? p (first vset))
                       (any-touching? p (rest vset)))])))
 
-;; on-plat?: Player Platform -> Boolean
-;; determines whether the player is on the given platform
-(check-expect (on-plat? (make-posn (* BKGD-W .375) ROW2) (make-platform (* BKGD-W .25) ROW2 R)) #f)
-(check-expect (on-plat? (make-posn (* BKGD-W .25) ROW2) (make-platform (* BKGD-W .25) ROW2 R)) #t)
-(define (on-plat? p plat)
-   (cond
-     [(string=? (platform-dir plat) "left")
-      (and (<= (abs (- (posn-x p) (platform-x plat))) (+ HALF-TURTLE-W HALF-FROG-W))
-           (<= (abs (- (posn-y p) (platform-y plat))) (+ HALF-TURTLE-H HALF-FROG-H)))]
-     [(string=? (platform-dir plat) "right")
-      (and (<= (abs (- (posn-x p) (platform-x plat))) (+ HALF-LOG-W HALF-FROG-W))
-           (<= (abs (- (posn-y p) (platform-y plat))) (+ HALF-LOG-H HALF-FROG-H)))]))
-
 ;; on-any-plat: Player PSet -> Boolean
+;; determines whether the player is on any platform in the given PSet
+(check-expect (on-any-plat? (make-posn (* BKGD-W .25) ROW2) PSET1) #t)
+(check-expect (on-any-plat? (make-posn (* BKGD-W .375) ROW2) PSET1) #f)
+(check-expect (on-any-plat? (make-posn HALF-BKGD-W ROW3) (list (make-platform HALF-BKGD-W ROW3 L)))
+              #t)
+(define (on-any-plat? p pset)
+  (local [;; on-plat?: Player Platform -> Boolean
+          ;; determines whether the player is on the given platform
+          (define (on-plat? p plat)
+            (cond
+              [(string=? (platform-dir plat) "left")
+               (and (<= (abs (- (posn-x p) (platform-x plat))) (+ HALF-TURTLE-W HALF-FROG-W))
+                    (<= (abs (- (posn-y p) (platform-y plat))) (+ HALF-TURTLE-H HALF-FROG-H)))]
+              [(string=? (platform-dir plat) "right")
+               (and (<= (abs (- (posn-x p) (platform-x plat))) (+ HALF-LOG-W HALF-FROG-W))
+                    (<= (abs (- (posn-y p) (platform-y plat))) (+ HALF-LOG-H HALF-FROG-H)))]))]
+    (cond
+      [(empty? pset) #f]
+      [(cons? pset) (or (on-plat? p (first pset))
+                        (on-any-plat? p (rest pset)))])))
 
 ;; final-scene: World -> Image
 ;; displays the final scene
